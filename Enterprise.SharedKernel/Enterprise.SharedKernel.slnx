@@ -1,0 +1,8 @@
+<Solution>
+  <Folder Name="/Src/" />
+  <Project Path="../Enterprise.Application.Tests/Enterprise.Application.Tests.csproj" Id="1a3ef3cd-4f23-42a2-bbb3-d34fb28ecb17" />
+  <Project Path="../Enterprise.SharedKernel.Application/Enterprise.SharedKernel.Application.csproj" Id="bbecf173-2073-4513-871d-3dbd1d0caa75" />
+  <Project Path="../Enterprise.SharedKernel.Infrastructure/Enterprise.SharedKernel.Infrastructure.csproj" Id="0833a257-724b-4aa4-ba3e-a792c8c3ac68" />
+  <Project Path="../Enterprise.SharedKernel.UI/Enterprise.SharedKernel.UI.csproj" Id="5f6bd71e-a93f-47a3-bf6f-9bfd2c8203c4" />
+  <Project Path="Enterprise.SharedKernel.csproj" />
+</Solution>

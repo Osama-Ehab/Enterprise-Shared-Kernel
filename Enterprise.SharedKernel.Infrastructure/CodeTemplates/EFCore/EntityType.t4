@@ -1,0 +1,224 @@
+<#@ template hostSpecific="true" #>
+<#@ assembly name="Microsoft.EntityFrameworkCore" #>
+<#@ assembly name="Microsoft.EntityFrameworkCore.Design" #>
+<#@ assembly name="Microsoft.EntityFrameworkCore.Relational" #>
+<#@ assembly name="Microsoft.Extensions.DependencyInjection.Abstractions" #>
+<#@ parameter name="EntityType" type="Microsoft.EntityFrameworkCore.Metadata.IEntityType" #>
+<#@ parameter name="Options" type="Microsoft.EntityFrameworkCore.Scaffolding.ModelCodeGenerationOptions" #>
+<#@ parameter name="NamespaceHint" type="System.String" #>
+<#@ import namespace="System.Collections.Generic" #>
+<#@ import namespace="System.ComponentModel.DataAnnotations" #>
+<#@ import namespace="System.Linq" #>
+<#@ import namespace="System.Text" #>
+<#@ import namespace="Microsoft.EntityFrameworkCore" #>
+<#@ import namespace="Microsoft.EntityFrameworkCore.Design" #>
+<#@ import namespace="Microsoft.Extensions.DependencyInjection" #>
+<#
+    if (EntityType.IsSimpleManyToManyJoinEntityType())
+    {
+        // Don't scaffold these
+        return "";
+    }
+
+    var services = (IServiceProvider)Host;
+    var annotationCodeGenerator = services.GetRequiredService<IAnnotationCodeGenerator>();
+    var code = services.GetRequiredService<ICSharpHelper>();
+
+    // 💡 Add your custom namespaces directly to this list to avoid duplicates
+    var usings = new List<string>
+    {
+        "System",
+        "System.Collections.Generic",
+        "System.ComponentModel.DataAnnotations.Schema", // 👈 Custom
+        "Enterprise.SharedKernel.Interfaces.Models"     // 👈 Custom
+    };
+
+    if (Options.UseDataAnnotations)
+    {
+        usings.Add("System.ComponentModel.DataAnnotations");
+        usings.Add("System.ComponentModel.DataAnnotations.Schema");
+        usings.Add("Microsoft.EntityFrameworkCore");
+    }
+
+    if (!string.IsNullOrEmpty(NamespaceHint))
+    {
+#>
+namespace <#= NamespaceHint #>;
+
+<#
+    }
+
+    if (!string.IsNullOrEmpty(EntityType.GetComment()))
+    {
+#>
+/// <summary>
+/// <#= code.XmlComment(EntityType.GetComment()) #>
+/// </summary>
+<#
+    }
+
+    if (Options.UseDataAnnotations)
+    {
+        foreach (var dataAnnotation in EntityType.GetDataAnnotations(annotationCodeGenerator))
+        {
+#>
+<#= code.Fragment(dataAnnotation) #>
+
+        }
+    }
+<#
+    // 1. البحث عن المفتاح الأساسي للجدول في الداتابيز
+    var pk = EntityType.FindPrimaryKey();
+    string interfaceDeclaration = "";
+ 
+    // 2. التأكد من وجود مفتاح أساسي، وأنه ليس مفتاحاً مركباً
+    if (pk != null && pk.Properties.Count == 1)
+    {
+        // 3. جلب نوع المفتاح
+        var pkType = pk.Properties[0].ClrType;
+        
+        // 4. دالة Reference تحوله إلى الشكل الأنيق في C#
+        string pkTypeName = code.Reference(pkType); 
+        
+        // 5. تجهيز النص النهائي للوراثة
+        interfaceDeclaration = $" : IEntity<{pkTypeName}>";
+
+        // البديل الصح لـ table.Columns في EF Core
+        // استخدمنا OrdinalIgnoreCase عشان نتجاهل حالة الحروف (كابيتال أو سمول)
+        bool isAuditable = EntityType.GetProperties().Any(p => p.Name.Equals("CreatedDate")) &&
+                           EntityType.GetProperties().Any(p => p.Name.Equals("CreatedBy") &&
+                           EntityType.GetProperties().Any(p => p.Name.Equals("ModifiedDate") &&
+                           EntityType.GetProperties().Any(p => p.Name.Equals("ModifiedBy");
+
+        string userKeyType = "";
+
+        if (isAuditable)
+        {
+            // بنجيب نوع الـ CreatedBy بنفس طريقة التجاهل لحالة الحروف
+            var createdByProperty = EntityType.GetProperties().First(p => p.Name.Equals("CreatedBy", StringComparison.OrdinalIgnoreCase));
+            
+            userKeyType = code.Reference(createdByProperty.ClrType); // هيحولها لـ string أو int     
+            interfaceDeclaration = $" : IAuditableEntity<{pkTypeName}, {userKeyType}>";
+        }
+    }
+#>
+
+
+public partial class <#= EntityType.Name #><#= interfaceDeclaration #>
+{
+<#
+    var firstProperty = true;
+    foreach (var property in EntityType.GetProperties().OrderBy(p => p.GetColumnOrder() ?? -1))
+    {
+        if (!firstProperty)
+        {
+            WriteLine("");
+        }
+
+        if (!string.IsNullOrEmpty(property.GetComment()))
+        {
+#>
+    /// <summary>
+    /// <#= code.XmlComment(property.GetComment(), indent: 1) #>
+    /// </summary>
+<#
+        }
+
+        if (Options.UseDataAnnotations)
+        {
+            var dataAnnotations = property.GetDataAnnotations(annotationCodeGenerator)
+                .Where(a => !(a.Type == typeof(RequiredAttribute) && Options.UseNullableReferenceTypes && !property.ClrType.IsValueType));
+            foreach (var dataAnnotation in dataAnnotations)
+            {
+#>
+    <#= code.Fragment(dataAnnotation) #>
+<#
+            }
+        }
+
+        usings.AddRange(code.GetRequiredUsings(property.ClrType));
+
+        var needsNullable = Options.UseNullableReferenceTypes && property.IsNullable && !property.ClrType.IsValueType;
+        var needsInitializer = Options.UseNullableReferenceTypes && !property.IsNullable && !property.ClrType.IsValueType;
+        
+        // 💡 [تعديل المهندس: التقاط الاسم وتغييره إذا كان ID]
+        var finalPropertyName = property.Name;
+        if (finalPropertyName.Equals("ID", StringComparison.OrdinalIgnoreCase))
+        {
+            finalPropertyName = "Id"; // فرض نمط C# PascalCase
+#>
+    [Column("<#= property.GetColumnName() #>")]
+<#
+        }
+        // [نهاية التعديل المهندس]
+#>
+    public <#= code.Reference(property.ClrType) #><#= needsNullable ? "?" : "" #> <#= finalPropertyName #> { get; set; }<#= needsInitializer ? " = null!;" : "" #>
+<#
+        firstProperty = false;
+    }
+
+    foreach (var navigation in EntityType.GetNavigations())
+    {
+        WriteLine("");
+
+        if (Options.UseDataAnnotations)
+        {
+            foreach (var dataAnnotation in navigation.GetDataAnnotations(annotationCodeGenerator))
+            {
+#>
+    <#= code.Fragment(dataAnnotation) #>
+<#
+            }
+        }
+
+        var targetType = navigation.TargetEntityType.Name;
+        if (navigation.IsCollection)
+        {
+#>
+    public virtual ICollection<<#= targetType #>> <#= navigation.Name #> { get; set; } = new List<<#= targetType #>>();
+<#
+        }
+        else
+        {
+            var needsNullable = Options.UseNullableReferenceTypes && !(navigation.ForeignKey.IsRequired && navigation.IsOnDependent);
+            var needsInitializer = Options.UseNullableReferenceTypes && navigation.ForeignKey.IsRequired && navigation.IsOnDependent;
+#>
+    public virtual <#= targetType #><#= needsNullable ? "?" : "" #> <#= navigation.Name #> { get; set; }<#= needsInitializer ? " = null!;" : "" #>
+<#
+        }
+    }
+
+    foreach (var skipNavigation in EntityType.GetSkipNavigations())
+    {
+        WriteLine("");
+
+        if (Options.UseDataAnnotations)
+        {
+            foreach (var dataAnnotation in skipNavigation.GetDataAnnotations(annotationCodeGenerator))
+            {
+#>
+    <#= code.Fragment(dataAnnotation) #>
+<#
+            }
+        }
+#>
+    public virtual ICollection<<#= skipNavigation.TargetEntityType.Name #>> <#= skipNavigation.Name #> { get; set; } = new List<<#= skipNavigation.TargetEntityType.Name #>>();
+<#
+    }
+#>
+}
+<#
+    var previousOutput = GenerationEnvironment;
+    GenerationEnvironment = new StringBuilder();
+
+    foreach (var ns in usings.Distinct().OrderBy(x => x, new NamespaceComparer()))
+    {
+#>
+using <#= ns #>;
+<#
+    }
+
+    WriteLine("");
+
+    GenerationEnvironment.Append(previousOutput);
+#>
